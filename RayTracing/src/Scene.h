@@ -7,7 +7,10 @@ struct Material {
 	glm::vec3 Albedo{1.f,1.f,1.f};
 	float Roughness=.1f;
 	float Metalic=0.f;
+	glm::vec3 EmssionColor{ 0.f,0.f,0.f };
+	float EmssionPower = 0.f;
 
+	const glm::vec3 GetEmssion()const { return EmssionPower * EmssionColor; }
 };
 
 struct Sphere {
@@ -19,4 +22,5 @@ struct Sphere {
 struct Scene {
 	std::vector<Sphere> Spheres;
 	std::vector<Material> Materials;
+	glm::vec3 SkyColor{ 0.5f,0.6f,0.8f };
 };

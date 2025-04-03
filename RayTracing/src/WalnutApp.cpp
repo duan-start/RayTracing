@@ -16,19 +16,47 @@ public:
 	ExampleLayer()
 		:m_Camera(45.f)
 	{
+	
 		Material& pink = m_Scene.Materials.emplace_back();
-		pink.Albedo= { 1.f,0.f,1.f };
+		pink.Albedo = { 1.f,0.f,1.f };
 
-		Material& blue = m_Scene.Materials.emplace_back();
-		blue.Albedo= { 0.2f,0.3f,1.0f };
+		Material& ground = m_Scene.Materials.emplace_back();
+		ground.Albedo = { 0.85f,0.75f,0.4f };
+
+		Material& Orange = m_Scene.Materials.emplace_back();
+		Orange.Albedo = { 0.8f,0.5f,0.2f };
+		Orange.EmssionColor = Orange.Albedo;
+		Orange.EmssionPower = 2.f;
+
+		Material& mirror = m_Scene.Materials.emplace_back();
+		mirror.Albedo = { 0.4f,0.6f,0.8f };
+		mirror.Roughness = 0.f;
+
 
 		{
 			Sphere sphere;
-			sphere.Position = { 0.f,0.f,-5.f };
-			sphere.Radius = 1.0f;
+			sphere.Position = { -1.2f,-0.6f,-4.f };
+			sphere.Radius = .6f;
 			sphere.MaterialIndex = 0;
 			m_Scene.Spheres.push_back(sphere);
 		}
+
+		{
+			Sphere sphere;
+			sphere.Position = { 8.f,1.8f,-11.5f };
+			sphere.Radius = 7.3f;
+			sphere.MaterialIndex = 2;
+			m_Scene.Spheres.push_back(sphere);
+		}
+
+		{
+			Sphere sphere;
+			sphere.Position = { 2.f,-0.7f,-4.f };
+			sphere.Radius = 0.5f;
+			sphere.MaterialIndex = 3;
+			m_Scene.Spheres.push_back(sphere);
+		}
+
 
 		{
 			Sphere sphere;
@@ -64,12 +92,18 @@ public:
 		}
 
 		ImGui::Checkbox("Accmulate", &m_Renderer.GetSetting().Accmulate);
+		ImGui::Checkbox("SlowRandom", &m_Renderer.GetSetting().SlowRandom);
+
 		if (ImGui::Button("Reset"))
 			m_Renderer.ResetFrameIndex();
 
 		ImGui::End();
 
 		ImGui::Begin("Scene");
+
+		ImGui::ColorEdit3("SkrColor", glm::value_ptr(m_Scene.SkyColor), .1f);
+		ImGui::Separator();
+
 		for (size_t i = 0; i < m_Scene.Spheres.size(); i++) {
 			ImGui::PushID(i);
 			
@@ -88,6 +122,8 @@ public:
 			ImGui::ColorEdit3("Albedo", glm::value_ptr(material.Albedo),.1f);
 			ImGui::DragFloat("Metalic", &material.Metalic, 0.05f, 0.f, 1.f);
 			ImGui::DragFloat("Roughness", &material.Roughness, 0.05f, 0.f, 1.f);
+			ImGui::DragFloat("Emssion Power", &material.EmssionPower, .05f,0.0f,FLT_MAX);
+			ImGui::ColorEdit3("Emssion Color", glm::value_ptr(material.EmssionColor), .1f);
 
 			ImGui::Separator();
 			ImGui::PopID();

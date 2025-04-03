@@ -11,6 +11,7 @@ class Renderer {
 	public:
 		struct Settings {
 			bool Accmulate = false;
+			bool SlowRandom = false;
 		};
 
 	public:
@@ -48,9 +49,13 @@ class Renderer {
 		uint32_t* m_ImageData = nullptr;
 		glm::vec4* m_AccumulationData = nullptr;
 
+		//´æ´¢¿í¸ßµÄÈÝÆ÷£¬µü´úÆ÷-¡·Ëã·¨
+		std::vector<uint32_t> m_ImageHorizonalIter, m_ImageVerticalIter;
+
 		int m_FrameIndex = 1;
 
 		const Camera* m_ActiveCamera;
 		const Scene* m_ActiveScene;
 		Settings m_Setting;
+
 };

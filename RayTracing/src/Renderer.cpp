@@ -1,6 +1,7 @@
 #include "Renderer.h"
 #include "Walnut/Random.h"
 
+#include <execution>
 #include <iostream>
 
 namespace WorkUtils {
@@ -10,6 +11,26 @@ namespace WorkUtils {
 		uint8_t b = 255*color.b;
 		uint8_t a = 255*color.a;
 		return 0x00000000 | (a << 24) | (b << 16) | (g << 8) | (r);
+	}
+
+	//伪随机数的生成，加速
+	static uint32_t PCG_Hash(uint32_t input) {
+		uint32_t state = input * 747796405u + 2891336453u;
+		uint32_t word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
+		return (word >> 22u) ^ word;
+	}
+
+	//由于并行实现的参数化
+	static float RandomFloat(uint32_t& seed) {
+		seed = PCG_Hash(seed);
+		return (float)seed / (float)std::numeric_limits<uint32_t>::max();
+	}
+
+	static glm::vec3 InUnitSphere(uint32_t& seed)
+	{
+		return glm::vec3(RandomFloat(seed)*2.0f-1.0f,
+			RandomFloat(seed) * 2.0f - 1.0f,
+			RandomFloat(seed) * 2.0f - 1.0f);
 	}
 }
 
@@ -22,6 +43,51 @@ void Renderer::Render(const Camera& camera, const Scene& scene)
 		memset(m_AccumulationData, 0, m_FinalImage->GetWidth() * m_FinalImage->GetHeight() * sizeof(glm::vec4));
 
 	//遍历所有的像素
+
+	//调用多线程
+#define MT 1
+
+#if  MT
+	std::for_each(std::execution::par, m_ImageVerticalIter.begin(), m_ImageVerticalIter.end(), [this](uint32_t y) {
+
+#if 0	//为每一个像素分配一个线程
+		std::for_each(std::execution::par, m_ImageHorizonalIter.begin(), m_ImageHorizonalIter.end(), [this, y](uint32_t x) {
+
+			glm::vec4 color = Perpixel(x, y);
+
+			m_AccumulationData[x + y * m_FinalImage->GetWidth()] += color;
+			glm::vec4 accumulateColor = m_AccumulationData[x + y * m_FinalImage->GetWidth()];
+			//做一个平均
+			accumulateColor /= (float)m_FrameIndex;
+
+			accumulateColor = glm::clamp(accumulateColor, glm::vec4(0.0f), glm::vec4(1.0f));
+			m_ImageData[x + y * m_FinalImage->GetWidth()] = WorkUtils::utils(accumulateColor);
+
+			});
+
+	});
+#else  //为每一行分配一个线程，硬件的性能都达到了顶峰，编译器会自动控制，不用管具体的
+		for (uint32_t x = 0; x < m_FinalImage->GetWidth(); x++) {
+			//四个字节，三十二位，从右往左是rgba 的格式
+			//现在做了一个更新，范围是在0->1
+			glm::vec4 color = Perpixel(x, y);
+
+			m_AccumulationData[x + y * m_FinalImage->GetWidth()] += color;
+			glm::vec4 accumulateColor = m_AccumulationData[x + y * m_FinalImage->GetWidth()];
+			//做一个平均
+			accumulateColor /= (float)m_FrameIndex;
+
+
+			accumulateColor = glm::clamp(accumulateColor, glm::vec4(0.0f), glm::vec4(1.0f));
+			m_ImageData[x + y * m_FinalImage->GetWidth()] = WorkUtils::utils(accumulateColor);
+			}
+	});
+
+#endif 
+
+
+#else
+
 	for (uint32_t y = 0; y < m_FinalImage->GetHeight(); y++) {
 		for (uint32_t x = 0; x < m_FinalImage->GetWidth(); x++) {
 			//四个字节，三十二位，从右往左是rgba 的格式
@@ -36,11 +102,12 @@ void Renderer::Render(const Camera& camera, const Scene& scene)
 			 accumulateColor = glm::clamp(accumulateColor, glm::vec4(0.0f), glm::vec4(1.0f));
 			m_ImageData[x + y * m_FinalImage->GetWidth()] =WorkUtils::utils(accumulateColor);
 
-
 			//glm::vec4 testColor = glm::clamp(color, glm::vec4(0.0f), glm::vec4(1.0f));
 			//m_ImageData[x + y * m_FinalImage->GetWidth()] = WorkUtils::utils(testColor);
 		}
 	}
+#endif
+
 	m_FinalImage->SetData(m_ImageData);
 	if (m_Setting.Accmulate)
 		m_FrameIndex++;
@@ -48,8 +115,6 @@ void Renderer::Render(const Camera& camera, const Scene& scene)
 	{
 		m_FrameIndex = 1;
 	}
-
-
 }
 
 void Renderer::OneResize(uint32_t width, uint32_t height)
@@ -69,6 +134,12 @@ void Renderer::OneResize(uint32_t width, uint32_t height)
 	delete[] m_AccumulationData;
 	m_AccumulationData = new glm::vec4[width * height];
 	
+	m_ImageHorizonalIter.resize(width);
+	m_ImageVerticalIter.resize(height);
+	for (int i = 0; i < width; i++)
+		m_ImageHorizonalIter[i] = i;
+	for (int i = 0; i < height; i++)
+		m_ImageVerticalIter[i] = i;
 }
 
 
@@ -84,37 +155,58 @@ glm::vec4 Renderer::Perpixel( uint32_t x, uint32_t y)
 	//x *= aspectradio;
 	ray.Direction = m_ActiveCamera->GetRayDirection()[x + y * m_FinalImage->GetWidth()];
 
+	//创建种子
+	uint32_t seed = x + y * m_FinalImage->GetWidth();
+	seed *= m_FrameIndex;
+
 	int bounce = 5;
-	float multiplier = 1.0f;
-	glm::vec3 color(0.f);
+	glm::vec3 contribution{ 1.0f };
+	glm::vec3 light(0.f);
 	for (int i = 0; i < bounce; i++) {
-		Renderer::HitPayload& payload = TraceRay(ray);
+		seed += i;
+
+        const Renderer::HitPayload& payload = TraceRay(ray);
 		if (payload.HitDistance < 0) {
-			glm::vec3 skyColor={ 0.6f,0.7f,0.9f };//天空的颜色
-			color += skyColor * multiplier;//后续可以加上ao之类的
+		//	glm::vec3 skyColor={ 0.3f,0.3f,0.45f };//天空的颜色
+			light += m_ActiveScene->SkyColor * contribution;//后续可以加上ao之类的
 			break;
 		}
 			
-		
-		//每个像素的着色（击中球体）
-		glm::vec3 lightDir = glm::normalize(glm::vec3(-1.f, -1.f, -1.f));
-		float lightIntensity = std::max(0.f, glm::dot(payload.WorldNormal, -lightDir));
-
 		const Sphere& sphere = m_ActiveScene->Spheres[payload.HitObjectIndex];
-		const Material& material = m_ActiveScene->Materials[sphere.MaterialIndex];
+		const Material& material = m_ActiveScene->Materials[sphere.MaterialIndex];	
 
-		glm::vec3 sphereColor = lightIntensity * (material.Albedo);
+		//每个像素的着色（击中球体）
+		// 定向光源
+	//	glm::vec3 lightDir = glm::normalize(glm::vec3(-1.f, -1.f, -1.f));
+	//	float lightIntensity = std::max(0.f, glm::dot(payload.WorldNormal, -lightDir));
+	//	glm::vec3 sphereColor = lightIntensity * (material.Albedo);
+	//	color += sphereColor * multiplier;
+
+		//light += material.Albedo*contribution;
+		//contribution *= 0.5f;
+
+		//光线被吸收和发光物体加重
+		contribution *= material.Albedo;
+		light += material.GetEmssion();
 		
-		color += sphereColor * multiplier;
-		multiplier *= 0.5f;
-	
 		ray.Origin = payload.Position + payload.WorldNormal* (float)1e-5 ;
 		//由于粗糙度的原因，我需要进行法线的偏移，微表面的原因
-		ray.Direction = glm::reflect(ray.Direction,payload.WorldNormal+ material.Roughness*Walnut::Random::Vec3(-0.5f,0.5f));
+		// 
+	//	ray.Direction = glm::reflect(ray.Direction,payload.WorldNormal+ material.Roughness*Walnut::Random::Vec3(-0.5f,0.5f));
+
+		if (m_Setting.SlowRandom) {
+			ray.Direction = glm::normalize(Walnut::Random::InUnitSphere() + payload.WorldNormal);
+		}
+		else {
+			ray.Direction = glm::normalize(WorkUtils::InUnitSphere(seed) + payload.WorldNormal);
+		}
+		
+
+
 	}
 
 	//glm::vec3 ambient(0.2f);
-	return{ color ,1.f };
+	return{ light ,1.f };
 
 }
 
