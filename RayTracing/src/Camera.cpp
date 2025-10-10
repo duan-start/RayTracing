@@ -130,6 +130,7 @@ void Camera::RecalculateRayDirection()
 
 			//返回世界坐标的空间位置
 			//针对裁剪空间的一个特定的平面发出的光线（一般选择远的，这一不会出错），将这个点的位置转为摄像机坐标的齐次表达
+			//四维的齐次空间
 			glm::vec4 target = m_InverseProjection * glm::vec4(coord.x, coord.y, 1.f, 1.f);
 
 			//转为摄像机坐标的标准表达，然后转成世界坐标的标准表达

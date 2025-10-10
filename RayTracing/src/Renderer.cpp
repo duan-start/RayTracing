@@ -6,9 +6,10 @@
 
 namespace WorkUtils {
 	static uint32_t utils(const glm::vec4& color) {
-		uint8_t r = 255*color.r;
-		uint8_t g = 255*color.g;
-		uint8_t b = 255*color.b;
+		glm::vec3 col=glm::pow((glm::vec3)color, glm::vec3(1.0f / 2.2f));
+		uint8_t r = 255*col.r;
+		uint8_t g = 255*col.g;
+		uint8_t b = 255*col.b;
 		uint8_t a = 255*color.a;
 		return 0x00000000 | (a << 24) | (b << 16) | (g << 8) | (r);
 	}
@@ -169,6 +170,7 @@ glm::vec4 Renderer::Perpixel( uint32_t x, uint32_t y)
 		if (payload.HitDistance < 0) {
 		//	glm::vec3 skyColor={ 0.3f,0.3f,0.45f };//天空的颜色
 			light += m_ActiveScene->SkyColor * contribution;//后续可以加上ao之类的
+			
 			break;
 		}
 			
@@ -185,28 +187,73 @@ glm::vec4 Renderer::Perpixel( uint32_t x, uint32_t y)
 		//light += material.Albedo*contribution;
 		//contribution *= 0.5f;
 
-		//光线被吸收和发光物体加重
-		contribution *= material.Albedo;
-		light += material.GetEmssion();
 		
-		ray.Origin = payload.Position + payload.WorldNormal* (float)1e-5 ;
+		//光线经过一次bounce剩下的能量和发光物体加重
+		contribution *= material.Albedo;//diffuse下的颜色
+		light += material.GetEmssion();//这个是发出的光线
+		
+		//ToDo:PBR
+		//由于既有折射又有反射的部分，不可能一根光线充当两个的作用，所有这里根据权重和概率随机选择
+		float diffuseWeight = 1.0f - material.Metalic; // 非金属更多漫反射
+		float specularWeight = material.Metalic;        // 金属优先镜面
+		float sumWeight = diffuseWeight + specularWeight;
+
+
+		ray.Origin = payload.Position + payload.WorldNormal * (float)1e-5;
 		//由于粗糙度的原因，我需要进行法线的偏移，微表面的原因
 		// 
 	//	ray.Direction = glm::reflect(ray.Direction,payload.WorldNormal+ material.Roughness*Walnut::Random::Vec3(-0.5f,0.5f));
 
-		if (m_Setting.SlowRandom) {
-			ray.Direction = glm::normalize(Walnut::Random::InUnitSphere() + payload.WorldNormal);
+		float p = Walnut::Random::Float();
+		
+		if (p < diffuseWeight) {
+			//这个是随机的反射，可以理解为漫反射的要求
+			glm::vec3 inDir = ray.Direction;
+			if (m_Setting.SlowRandom) {
+				ray.Direction = glm::normalize(Walnut::Random::InUnitSphere() + payload.WorldNormal);
+			}
+			else {
+				ray.Direction = glm::normalize(WorkUtils::InUnitSphere(seed) + payload.WorldNormal);
+			}
+			// 2. 计算 pdf
+			//float pdf = glm::dot(ray.Direction, payload.WorldNormal) / 3.14;
+
+			// 3. 贡献
+			//glm::vec3 F0 = glm::mix(glm::vec3(0.04f), material.Albedo, material.Metalic);
+			//glm::vec3 diffuseBRDF = material.Albedo / (glm::vec3) 3.14 * (1.0f - F0) * (1.0f - material.Metalic);
+			//contribution *= diffuseBRDF * glm::dot(ray.Direction, payload.WorldNormal) / pdf;
 		}
 		else {
-			ray.Direction = glm::normalize(WorkUtils::InUnitSphere(seed) + payload.WorldNormal);
+			// 1. 入射方向（指向表面）
+			//glm::vec3 V = -ray.Direction;
+
+			// 2. 理想镜面方向
+			glm::vec3 idealReflect = glm::reflect(ray.Direction, payload.WorldNormal);
+
+			// 3. 粗糙扰动（近似微表面）
+			glm::vec3 roughReflect = glm::normalize(idealReflect + material.Roughness * WorkUtils::InUnitSphere(seed));
+
+			// 4. 半程向量
+			//glm::vec3 H = glm::normalize(V + roughReflect);
+
+			// 5. Cook-Torrance BRDF 贡献
+			//float NdotL = std::max(glm::dot(payload.WorldNormal, roughReflect), 0.0f);
+			//??
+			//contribution *= BRDF(V, roughReflect, payload.WorldNormal, material) ;
+
+			// 6. 更新 ray 方向
+			ray.Direction = roughReflect;
+
+
+
 		}
 		
-
 
 	}
 
 	//glm::vec3 ambient(0.2f);
-	return{ light ,1.f };
+	
+	return { light, 1.0f };
 
 }
 
@@ -276,6 +323,74 @@ glm::vec4 Renderer::Perpixel( uint32_t x, uint32_t y)
 	  //lightdir = glm::normalize(lightdir);
 	
 	  return payload;
+  }
+
+  glm::vec3 Renderer::BRDF(const glm::vec3& inDir, const glm::vec3& outDir, const glm::vec3& worldNormol, const Material& material)
+  {
+	  glm::vec3 V = outDir;       // 出射方向，指向观察者
+	  glm::vec3 L = inDir;        // 入射方向，指向光源或采样方向
+	  glm::vec3 H = glm::normalize(V + L);
+
+	  float NdotL = std::max(glm::dot(worldNormol, L), 0.0f);
+	  float NdotV = std::max(glm::dot(worldNormol, V), 0.0f);
+	  float NdotH = std::max(glm::dot(worldNormol, H), 0.0f);
+	  float VdotH = std::max(glm::dot(V, H), 0.0f);
+
+	  // --- NDF: GGX ---
+	  float alpha = std::max(material.Roughness, 0.001f);
+	  float alpha2 = alpha * alpha;
+	  float denom = NdotH * NdotH * (alpha2 - 1.0f) + 1.0f;
+	  float D = alpha2 / (3.14* denom * denom);
+
+	  // --- Fresnel ---
+	  glm::vec3 F0 = glm::mix(glm::vec3(0.04f), material.Albedo, material.Metalic);
+	  glm::vec3 F = F0 + (glm::vec3(1.0f) - F0) * pow(1.0f - VdotH, 5.0f);
+
+	  // --- Geometry: Smith ---
+	  auto G1 = [](float NdotX, float alpha) {
+		  return 2.0f * NdotX / (NdotX + sqrt(alpha * alpha + (1.0f - alpha * alpha) * NdotX * NdotX));
+		  };
+	  float G = G1(NdotL, alpha) * G1(NdotV, alpha);
+
+	  // --- Cook-Torrance specular ---
+	  float denominator = 4.0f * NdotL * NdotV + 1e-5f;
+	  glm::vec3 specular = (D * F * G) / denominator;
+
+	  return specular;
+	  
+  }
+
+  float Renderer::Distri(const glm::vec3& half, const glm::vec3& normal, float roughness)
+  {
+	  float alpha = roughness * roughness;
+	  float NdotH = std::max(glm::dot(normal, half), 0.0f);
+	  float denom = (NdotH * NdotH * (alpha * alpha - 1.0f) + 1.0f);
+	  return (alpha * alpha) / (3.14 * denom * denom);
+  }
+
+  // ----------------------------
+  // 2. F - Schlick Fresnel
+  // ----------------------------
+  glm::vec3 Renderer::Fer(const glm::vec3& inDir, const glm::vec3& half, const glm::vec3& Albedo)
+  {
+	  float VoH = std::max(glm::dot(inDir, half), 0.0f);
+	  return Albedo + (glm::vec3(1.0f) - Albedo) * pow(1.0f - VoH, 5.0f);
+  }
+
+  // ----------------------------
+  // 3. G - Geometry / Smith
+  // ----------------------------
+  float Renderer::G1(float NdotV, float roughness)
+  {
+	  float alpha = roughness * roughness;
+	  return 2.0f * NdotV / (NdotV + sqrt(alpha + (1.0f - alpha) * NdotV * NdotV));
+  }
+
+  float Renderer::Gxx(const glm::vec3& inDir, const glm::vec3& outDir, const glm::vec3& normal, float roughness)
+  {
+	  float NdotL = std::max(glm::dot(normal, inDir), 0.0f);
+	  float NdotV = std::max(glm::dot(normal, outDir), 0.0f);
+	  return G1(NdotL, roughness) * G1(NdotV, roughness);
   }
 
 	

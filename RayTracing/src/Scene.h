@@ -4,6 +4,7 @@
 
 
 struct Material {
+	//Todo:: PBR
 	glm::vec3 Albedo{1.f,1.f,1.f};
 	float Roughness=.1f;
 	float Metalic=0.f;

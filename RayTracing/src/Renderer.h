@@ -43,7 +43,14 @@ class Renderer {
 		HitPayload TraceRay(const Ray& ray);
 		HitPayload Miss(const Ray& ray);
 		HitPayload ClosestHit(const Ray& ray,float hitDistance,int objectId);
-
+	//BRDF
+	private:
+		//¾µÃæ·´ÉäµÄ¹±Ï×
+		glm::vec3 BRDF(const glm::vec3& inDir, const glm::vec3& outDir, const glm::vec3& worldNormol, const Material& material);
+		float Distri(const glm::vec3& half, const glm::vec3& normal, float roughness);
+		glm::vec3 Fer(const glm::vec3& inDir, const glm::vec3& half, const glm::vec3& Albedo);
+		float Gxx(const glm::vec3& inDir, const glm::vec3& outDir, const glm::vec3& normal, float roughness);
+		float G1(float NdotV, float roughness);
 	private:
 		std::shared_ptr<Walnut::Image> m_FinalImage;
 		uint32_t* m_ImageData = nullptr;
