@@ -18,19 +18,18 @@ public:
 	{
 	
 		Material& pink = m_Scene.Materials.emplace_back();
-		pink.Albedo = { 1.f,0.f,1.f };
+		pink.albedo = { 1.f,0.f,1.f };
 
 		Material& ground = m_Scene.Materials.emplace_back();
-		ground.Albedo = { 0.85f,0.75f,0.4f };
+		ground.albedo = { 0.85f,0.75f,0.4f };
 
 		Material& Orange = m_Scene.Materials.emplace_back();
-		Orange.Albedo = { 0.8f,0.5f,0.2f };
-		Orange.EmssionColor = Orange.Albedo;
-		Orange.EmssionPower = 2.f;
+		Orange.albedo = { 0.8f,0.5f,0.2f };
+		Orange.emission = Orange.albedo;
 
 		Material& mirror = m_Scene.Materials.emplace_back();
-		mirror.Albedo = { 0.4f,0.6f,0.8f };
-		mirror.Roughness = 0.f;
+		mirror.albedo = { 0.4f,0.6f,0.8f };
+		mirror.roughness = 0.f;
 
 
 		{
@@ -119,12 +118,12 @@ public:
 
 			Material& material = m_Scene.Materials[i];
 
-			ImGui::ColorEdit3("Albedo", glm::value_ptr(material.Albedo),.1f);
-			ImGui::DragFloat("Metalic", &material.Metalic, 0.05f, 0.f, 1.f);
-			ImGui::DragFloat("Roughness", &material.Roughness, 0.05f, 0.f, 1.f);
-			ImGui::DragFloat("Emssion Power", &material.EmssionPower, .05f,0.0f,FLT_MAX);
-			ImGui::ColorEdit3("Emssion Color", glm::value_ptr(material.EmssionColor), .1f);
-
+			ImGui::ColorEdit3("Albedo", glm::value_ptr(material.albedo),.1f);
+			ImGui::DragFloat("Metalic", &material.metallic, 0.05f, 0.f, 1.f);
+			ImGui::DragFloat("Roughness", &material.roughness, 0.05f, 0.f, 1.f);
+			ImGui::DragFloat("Emssion exposure", &material.exposure, .05f,0.0f,FLT_MAX);
+			ImGui::ColorEdit3("Emssion Color", glm::value_ptr(material.emission), .1f);
+			
 			ImGui::Separator();
 			ImGui::PopID();
 		}

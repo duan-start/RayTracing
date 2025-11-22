@@ -1,10 +1,32 @@
-#include "Renderer.h"
+ï»¿#include "Renderer.h"
 #include "Walnut/Random.h"
 
 #include <execution>
 #include <iostream>
 
+extern const float PI;
 namespace WorkUtils {
+	// åˆ›å»ºå±€éƒ¨åæ ‡ç³»ï¼ˆä»»æ„å‚ç›´åŸºåº•ï¼‰
+	static void CreateCoordinateSystem(const glm::vec3& N, glm::vec3& T, glm::vec3& B)
+	{
+		glm::vec3 up = glm::abs(N.z) < 0.999f ? glm::vec3(0, 0, 1) : glm::vec3(0, 1, 0);
+		T = glm::normalize(glm::cross(up, N));
+		B = glm::cross(N, T);
+	}
+
+	// ä½™å¼¦åŠ æƒåŠçƒé‡‡æ ·ï¼ˆLambert æ¼«åå°„å¿…å¤‡ï¼ï¼‰
+	static glm::vec3 CosineSampleHemisphere(uint32_t& seed)
+	{
+		float r = std::sqrt(Walnut::Random::Float(seed));
+		float theta = 2.0f * PI * Walnut::Random::Float(seed);
+
+		float x = r * std::cos(theta);
+		float y = r * std::sin(theta);
+		float z = std::sqrt(1.0f - r * r);  // æ³¨æ„æ˜¯ 1-rÂ²
+
+		return glm::vec3(x, y, z);
+	}
+
 	static uint32_t utils(const glm::vec4& color) {
 		glm::vec3 col=glm::pow((glm::vec3)color, glm::vec3(1.0f / 2.2f));
 		uint8_t r = 255*col.r;
@@ -14,14 +36,14 @@ namespace WorkUtils {
 		return 0x00000000 | (a << 24) | (b << 16) | (g << 8) | (r);
 	}
 
-	//Î±Ëæ»úÊıµÄÉú³É£¬¼ÓËÙ
+	//ä¼ªéšæœºæ•°çš„ç”Ÿæˆï¼ŒåŠ é€Ÿ
 	static uint32_t PCG_Hash(uint32_t input) {
 		uint32_t state = input * 747796405u + 2891336453u;
 		uint32_t word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
 		return (word >> 22u) ^ word;
 	}
 
-	//ÓÉÓÚ²¢ĞĞÊµÏÖµÄ²ÎÊı»¯
+	//ç”±äºå¹¶è¡Œå®ç°çš„å‚æ•°åŒ–
 	static float RandomFloat(uint32_t& seed) {
 		seed = PCG_Hash(seed);
 		return (float)seed / (float)std::numeric_limits<uint32_t>::max();
@@ -43,22 +65,22 @@ void Renderer::Render(const Camera& camera, const Scene& scene)
 	if (m_FrameIndex == 1)
 		memset(m_AccumulationData, 0, m_FinalImage->GetWidth() * m_FinalImage->GetHeight() * sizeof(glm::vec4));
 
-	//±éÀúËùÓĞµÄÏñËØ
+	//éå†æ‰€æœ‰çš„åƒç´ 
 
-	//µ÷ÓÃ¶àÏß³Ì
+	//è°ƒç”¨å¤šçº¿ç¨‹
 #define MT 1
 
 #if  MT
 	std::for_each(std::execution::par, m_ImageVerticalIter.begin(), m_ImageVerticalIter.end(), [this](uint32_t y) {
 
-#if 0	//ÎªÃ¿Ò»¸öÏñËØ·ÖÅäÒ»¸öÏß³Ì
+#if 0	//ä¸ºæ¯ä¸€ä¸ªåƒç´ åˆ†é…ä¸€ä¸ªçº¿ç¨‹
 		std::for_each(std::execution::par, m_ImageHorizonalIter.begin(), m_ImageHorizonalIter.end(), [this, y](uint32_t x) {
 
 			glm::vec4 color = Perpixel(x, y);
 
 			m_AccumulationData[x + y * m_FinalImage->GetWidth()] += color;
 			glm::vec4 accumulateColor = m_AccumulationData[x + y * m_FinalImage->GetWidth()];
-			//×öÒ»¸öÆ½¾ù
+			//åšä¸€ä¸ªå¹³å‡
 			accumulateColor /= (float)m_FrameIndex;
 
 			accumulateColor = glm::clamp(accumulateColor, glm::vec4(0.0f), glm::vec4(1.0f));
@@ -67,15 +89,15 @@ void Renderer::Render(const Camera& camera, const Scene& scene)
 			});
 
 	});
-#else  //ÎªÃ¿Ò»ĞĞ·ÖÅäÒ»¸öÏß³Ì£¬Ó²¼şµÄĞÔÄÜ¶¼´ïµ½ÁË¶¥·å£¬±àÒëÆ÷»á×Ô¶¯¿ØÖÆ£¬²»ÓÃ¹Ü¾ßÌåµÄ
+#else  //ä¸ºæ¯ä¸€è¡Œåˆ†é…ä¸€ä¸ªçº¿ç¨‹ï¼Œç¡¬ä»¶çš„æ€§èƒ½éƒ½è¾¾åˆ°äº†é¡¶å³°ï¼Œç¼–è¯‘å™¨ä¼šè‡ªåŠ¨æ§åˆ¶ï¼Œä¸ç”¨ç®¡å…·ä½“çš„
 		for (uint32_t x = 0; x < m_FinalImage->GetWidth(); x++) {
-			//ËÄ¸ö×Ö½Ú£¬ÈıÊ®¶şÎ»£¬´ÓÓÒÍù×óÊÇrgba µÄ¸ñÊ½
-			//ÏÖÔÚ×öÁËÒ»¸ö¸üĞÂ£¬·¶Î§ÊÇÔÚ0->1
+			//å››ä¸ªå­—èŠ‚ï¼Œä¸‰åäºŒä½ï¼Œä»å³å¾€å·¦æ˜¯rgba çš„æ ¼å¼
+			//ç°åœ¨åšäº†ä¸€ä¸ªæ›´æ–°ï¼ŒèŒƒå›´æ˜¯åœ¨0->1
 			glm::vec4 color = Perpixel(x, y);
 
 			m_AccumulationData[x + y * m_FinalImage->GetWidth()] += color;
 			glm::vec4 accumulateColor = m_AccumulationData[x + y * m_FinalImage->GetWidth()];
-			//×öÒ»¸öÆ½¾ù
+			//åšä¸€ä¸ªå¹³å‡
 			accumulateColor /= (float)m_FrameIndex;
 
 
@@ -91,13 +113,13 @@ void Renderer::Render(const Camera& camera, const Scene& scene)
 
 	for (uint32_t y = 0; y < m_FinalImage->GetHeight(); y++) {
 		for (uint32_t x = 0; x < m_FinalImage->GetWidth(); x++) {
-			//ËÄ¸ö×Ö½Ú£¬ÈıÊ®¶şÎ»£¬´ÓÓÒÍù×óÊÇrgba µÄ¸ñÊ½
-			//ÏÖÔÚ×öÁËÒ»¸ö¸üĞÂ£¬·¶Î§ÊÇÔÚ0->1
+			//å››ä¸ªå­—èŠ‚ï¼Œä¸‰åäºŒä½ï¼Œä»å³å¾€å·¦æ˜¯rgba çš„æ ¼å¼
+			//ç°åœ¨åšäº†ä¸€ä¸ªæ›´æ–°ï¼ŒèŒƒå›´æ˜¯åœ¨0->1
 			glm::vec4 color = Perpixel(x, y);
 
 			m_AccumulationData[x + y * m_FinalImage->GetWidth()] += color;
 			glm::vec4 accumulateColor = m_AccumulationData[x + y * m_FinalImage->GetWidth()];
-			//×öÒ»¸öÆ½¾ù
+			//åšä¸€ä¸ªå¹³å‡
 			accumulateColor /=(float) m_FrameIndex;
 
 			 accumulateColor = glm::clamp(accumulateColor, glm::vec4(0.0f), glm::vec4(1.0f));
@@ -129,7 +151,7 @@ void Renderer::OneResize(uint32_t width, uint32_t height)
 		m_FinalImage = std::make_shared<Walnut::Image>(width, height, Walnut::ImageFormat::RGBA);
 	}
 	
-	//»á×Ô¶¯ÅĞ¶Ï¿ÕÖ¸ÕëµÄÇé¿ö£¬²»»á±¨´í
+	//ä¼šè‡ªåŠ¨åˆ¤æ–­ç©ºæŒ‡é’ˆçš„æƒ…å†µï¼Œä¸ä¼šæŠ¥é”™
 	delete[] m_ImageData;
 	m_ImageData = new uint32_t[width * height];
 	delete[] m_AccumulationData;
@@ -144,120 +166,212 @@ void Renderer::OneResize(uint32_t width, uint32_t height)
 }
 
 
-//¹âÏß×·×Ù
+//å…‰çº¿è¿½è¸ª
 glm::vec4 Renderer::Perpixel( uint32_t x, uint32_t y)
 {
 
-	Ray ray;
-	ray.Origin = m_ActiveCamera->GetPosition();
-	//ÎªÊ²Ã´ÕâÀïÃ»ÓĞÒ²²»»á±äĞÎÁË£¬ÕâÀïÊÇÏñËØ×ÅÉ«£¬
-	// Í¸ÊÓÍ¶Ó°µÄ¾ØÕó¿¼ÂÇµÄ¿í¸ß±È
-	//±£Ö¤¹âÏßÉä³öµÄÊıÁ¿ÊÇÒ»ÖÂµÄ,ºá×İ×ø±ê
-	//x *= aspectradio;
-	ray.Direction = m_ActiveCamera->GetRayDirection()[x + y * m_FinalImage->GetWidth()];
+	//Ray ray;
+	//ray.Origin = m_ActiveCamera->GetPosition();
+	////ä¸ºä»€ä¹ˆè¿™é‡Œæ²¡æœ‰ä¹Ÿä¸ä¼šå˜å½¢äº†ï¼Œè¿™é‡Œæ˜¯åƒç´ ç€è‰²ï¼Œ
+	//// é€è§†æŠ•å½±çš„çŸ©é˜µè€ƒè™‘çš„å®½é«˜æ¯”
+	////ä¿è¯å…‰çº¿å°„å‡ºçš„æ•°é‡æ˜¯ä¸€è‡´çš„,æ¨ªçºµåæ ‡
+	////x *= aspectradio;
+	//ray.Direction = m_ActiveCamera->GetRayDirection()[x + y * m_FinalImage->GetWidth()];
 
-	//´´½¨ÖÖ×Ó
-	uint32_t seed = x + y * m_FinalImage->GetWidth();
-	seed *= m_FrameIndex;
+	////åˆ›å»ºç§å­
+	//uint32_t seed = x + y * m_FinalImage->GetWidth();
+	//seed *= m_FrameIndex;
 
-	int bounce = 5;
-	glm::vec3 contribution{ 1.0f };
-	glm::vec3 light(0.f);
-	for (int i = 0; i < bounce; i++) {
-		seed += i;
+	//int bounce = 5;
+	//glm::vec3 contribution{ 1.0f };
+	//glm::vec3 light(0.f);
+	////å¯ä»¥é€šè¿‡å¾ªç¯å®ç°ï¼Œä¹Ÿå¯ä»¥é€šè¿‡é€’å½’å®ç°
+	//for (int i = 0; i < bounce; i++) {
+	//	seed += i;
 
-        const Renderer::HitPayload& payload = TraceRay(ray);
-		if (payload.HitDistance < 0) {
-		//	glm::vec3 skyColor={ 0.3f,0.3f,0.45f };//Ìì¿ÕµÄÑÕÉ«
-			light += m_ActiveScene->SkyColor * contribution;//ºóĞø¿ÉÒÔ¼ÓÉÏaoÖ®ÀàµÄ
-			
-			break;
-		}
-			
-		const Sphere& sphere = m_ActiveScene->Spheres[payload.HitObjectIndex];
-		const Material& material = m_ActiveScene->Materials[sphere.MaterialIndex];	
+ //       const Renderer::HitPayload& payload = TraceRay(ray);
+	//	if (payload.HitDistance < 0) {
+	//	//	glm::vec3 skyColor={ 0.3f,0.3f,0.45f };//å¤©ç©ºçš„é¢œè‰²
+	//		light += m_ActiveScene->SkyColor * contribution;//åç»­å¯ä»¥åŠ ä¸Šaoä¹‹ç±»çš„
+	//		
+	//		break;
+	//	}
+	//		
+	//	const Sphere& sphere = m_ActiveScene->Spheres[payload.HitObjectIndex];
+	//	const Material& material = m_ActiveScene->Materials[sphere.MaterialIndex];	
 
-		//Ã¿¸öÏñËØµÄ×ÅÉ«£¨»÷ÖĞÇòÌå£©
-		// ¶¨Ïò¹âÔ´
-	//	glm::vec3 lightDir = glm::normalize(glm::vec3(-1.f, -1.f, -1.f));
-	//	float lightIntensity = std::max(0.f, glm::dot(payload.WorldNormal, -lightDir));
-	//	glm::vec3 sphereColor = lightIntensity * (material.Albedo);
-	//	color += sphereColor * multiplier;
+	//	//æ¯ä¸ªåƒç´ çš„ç€è‰²ï¼ˆå‡»ä¸­çƒä½“ï¼‰
+	//	// å®šå‘å…‰æº
+	////	glm::vec3 lightDir = glm::normalize(glm::vec3(-1.f, -1.f, -1.f));
+	////	float lightIntensity = std::max(0.f, glm::dot(payload.WorldNormal, -lightDir));
+	////	glm::vec3 sphereColor = lightIntensity * (material.Albedo);
+	////	color += sphereColor * multiplier;
 
-		//light += material.Albedo*contribution;
-		//contribution *= 0.5f;
+	//	//light += material.Albedo*contribution;
+	//	//contribution *= 0.5f;
 
-		
-		//¹âÏß¾­¹ıÒ»´ÎbounceÊ£ÏÂµÄÄÜÁ¿ºÍ·¢¹âÎïÌå¼ÓÖØ
-		contribution *= material.Albedo;//diffuseÏÂµÄÑÕÉ«
-		light += material.GetEmssion();//Õâ¸öÊÇ·¢³öµÄ¹âÏß
-		
-		//ToDo:PBR
-		//ÓÉÓÚ¼ÈÓĞÕÛÉäÓÖÓĞ·´ÉäµÄ²¿·Ö£¬²»¿ÉÄÜÒ»¸ù¹âÏß³äµ±Á½¸öµÄ×÷ÓÃ£¬ËùÓĞÕâÀï¸ù¾İÈ¨ÖØºÍ¸ÅÂÊËæ»úÑ¡Ôñ
-		float diffuseWeight = 1.0f - material.Metalic; // ·Ç½ğÊô¸ü¶àÂş·´Éä
-		float specularWeight = material.Metalic;        // ½ğÊôÓÅÏÈ¾µÃæ
-		float sumWeight = diffuseWeight + specularWeight;
-
-
-		ray.Origin = payload.Position + payload.WorldNormal * (float)1e-5;
-		//ÓÉÓÚ´Ö²Ú¶ÈµÄÔ­Òò£¬ÎÒĞèÒª½øĞĞ·¨ÏßµÄÆ«ÒÆ£¬Î¢±íÃæµÄÔ­Òò
-		// 
-	//	ray.Direction = glm::reflect(ray.Direction,payload.WorldNormal+ material.Roughness*Walnut::Random::Vec3(-0.5f,0.5f));
-
-		float p = Walnut::Random::Float();
-		
-		if (p < diffuseWeight) {
-			//Õâ¸öÊÇËæ»úµÄ·´Éä£¬¿ÉÒÔÀí½âÎªÂş·´ÉäµÄÒªÇó
-			glm::vec3 inDir = ray.Direction;
-			if (m_Setting.SlowRandom) {
-				ray.Direction = glm::normalize(Walnut::Random::InUnitSphere() + payload.WorldNormal);
-			}
-			else {
-				ray.Direction = glm::normalize(WorkUtils::InUnitSphere(seed) + payload.WorldNormal);
-			}
-			// 2. ¼ÆËã pdf
-			//float pdf = glm::dot(ray.Direction, payload.WorldNormal) / 3.14;
-
-			// 3. ¹±Ï×
-			//glm::vec3 F0 = glm::mix(glm::vec3(0.04f), material.Albedo, material.Metalic);
-			//glm::vec3 diffuseBRDF = material.Albedo / (glm::vec3) 3.14 * (1.0f - F0) * (1.0f - material.Metalic);
-			//contribution *= diffuseBRDF * glm::dot(ray.Direction, payload.WorldNormal) / pdf;
-		}
-		else {
-			// 1. ÈëÉä·½Ïò£¨Ö¸Ïò±íÃæ£©
-			//glm::vec3 V = -ray.Direction;
-
-			// 2. ÀíÏë¾µÃæ·½Ïò
-			glm::vec3 idealReflect = glm::reflect(ray.Direction, payload.WorldNormal);
-
-			// 3. ´Ö²ÚÈÅ¶¯£¨½üËÆÎ¢±íÃæ£©
-			glm::vec3 roughReflect = glm::normalize(idealReflect + material.Roughness * WorkUtils::InUnitSphere(seed));
-
-			// 4. °ë³ÌÏòÁ¿
-			//glm::vec3 H = glm::normalize(V + roughReflect);
-
-			// 5. Cook-Torrance BRDF ¹±Ï×
-			//float NdotL = std::max(glm::dot(payload.WorldNormal, roughReflect), 0.0f);
-			//??
-			//contribution *= BRDF(V, roughReflect, payload.WorldNormal, material) ;
-
-			// 6. ¸üĞÂ ray ·½Ïò
-			ray.Direction = roughReflect;
+	//	
+	//	//å…‰çº¿ç»è¿‡ä¸€æ¬¡bounceå‰©ä¸‹çš„èƒ½é‡å’Œå‘å…‰ç‰©ä½“åŠ é‡
+	//	contribution *= material.albedo;//diffuseä¸‹çš„é¢œè‰²
+	//	light += material.getEmission();//è¿™ä¸ªæ˜¯å‘å‡ºçš„å…‰çº¿
+	//	
+	//	//ToDo:PBR
+	//	//ç”±äºæ—¢æœ‰æŠ˜å°„åˆæœ‰åå°„çš„éƒ¨åˆ†ï¼Œä¸å¯èƒ½ä¸€æ ¹å…‰çº¿å……å½“ä¸¤ä¸ªçš„ä½œç”¨ï¼Œæ‰€æœ‰è¿™é‡Œæ ¹æ®æƒé‡å’Œæ¦‚ç‡éšæœºé€‰æ‹©
+	//	float diffuseWeight = 1.0f - material.metallic; // éé‡‘å±æ›´å¤šæ¼«åå°„
+	//	float specularWeight = material.metallic;        // é‡‘å±ä¼˜å…ˆé•œé¢
+	//	float sumWeight = diffuseWeight + specularWeight;
 
 
+	//	ray.Origin = payload.Position + payload.WorldNormal * (float)1e-5;
+	//	//ç”±äºç²—ç³™åº¦çš„åŸå› ï¼Œæˆ‘éœ€è¦è¿›è¡Œæ³•çº¿çš„åç§»ï¼Œå¾®è¡¨é¢çš„åŸå› 
+	//	// 
+	////	ray.Direction = glm::reflect(ray.Direction,payload.WorldNormal+ material.Roughness*Walnut::Random::Vec3(-0.5f,0.5f));
 
-		}
-		
+	//	float p = Walnut::Random::Float();
+	//	
+	//	if (p < diffuseWeight) {
+	//		//è¿™ä¸ªæ˜¯éšæœºçš„åå°„ï¼Œå¯ä»¥ç†è§£ä¸ºæ¼«åå°„çš„è¦æ±‚
+	//		glm::vec3 inDir = ray.Direction;
+	//		if (m_Setting.SlowRandom) {
+	//			ray.Direction = glm::normalize(Walnut::Random::InUnitSphere() + payload.WorldNormal);
+	//		}
+	//		else {
+	//			ray.Direction = glm::normalize(WorkUtils::InUnitSphere(seed) + payload.WorldNormal);
+	//		}
+	//		// 2. è®¡ç®— pdf
+	//		//float pdf = glm::dot(ray.Direction, payload.WorldNormal) / 3.14;
 
+	//		// 3. è´¡çŒ®
+	//		//glm::vec3 F0 = glm::mix(glm::vec3(0.04f), material.Albedo, material.Metalic);
+	//		//glm::vec3 diffuseBRDF = material.Albedo / (glm::vec3) 3.14 * (1.0f - F0) * (1.0f - material.Metalic);
+	//		//contribution *= diffuseBRDF * glm::dot(ray.Direction, payload.WorldNormal) / pdf;
+	//	}
+	//	else {
+	//		// 1. å…¥å°„æ–¹å‘ï¼ˆæŒ‡å‘è¡¨é¢ï¼‰
+	//		//glm::vec3 V = -ray.Direction;
+	//		// 2. ç†æƒ³é•œé¢æ–¹å‘
+	//		glm::vec3 idealReflect = glm::reflect(ray.Direction, payload.WorldNormal);
+	//		// 3. ç²—ç³™æ‰°åŠ¨ï¼ˆè¿‘ä¼¼å¾®è¡¨é¢ï¼‰
+	//		glm::vec3 roughReflect = glm::normalize(idealReflect + material.roughness * WorkUtils::InUnitSphere(seed));
+	//		// 4. åŠç¨‹å‘é‡
+	//		//glm::vec3 H = glm::normalize(V + roughReflect);
+	//		// 5. Cook-Torrance BRDF è´¡çŒ®
+	//		//float NdotL = std::max(glm::dot(payload.WorldNormal, roughReflect), 0.0f);
+	//		//??
+	//		//contribution *= BRDF(V, roughReflect, payload.WorldNormal, material) ;
+	//		// 6. æ›´æ–° ray æ–¹å‘
+	//		ray.Direction = roughReflect;
+	//	}
+	//	
+	//}
+	////glm::vec3 ambient(0.2f);
+	//
+	//return { light, 1.0f };
+Ray ray;
+ray.Origin = m_ActiveCamera->GetPosition();
+
+// è¿™é‡Œä½ å†™å¯¹äº†ï¼ä¸éœ€è¦å†ä¹˜ aspect ratio
+// å› ä¸º GetRayDirection() å·²ç»è¿”å›å½’ä¸€åŒ–åçš„ã€è€ƒè™‘äº†å®½é«˜æ¯”çš„å°„çº¿æ–¹å‘
+ray.Direction = m_ActiveCamera->GetRayDirection()[x + y * m_FinalImage->GetWidth()];
+
+uint32_t seed = x + y * m_FinalImage->GetWidth();
+seed *= m_FrameIndex;
+
+glm::vec3 contribution(1.0f);   // å½“å‰è·¯å¾„çš„èƒ½é‡ï¼ˆthroughputï¼‰
+glm::vec3 light(0.0f);          // ç´¯ç§¯è¾å°„äº®åº¦
+
+int maxBounces = 8;             // å»ºè®® 6~10ï¼Œå¤šäº†ä¹Ÿæ²¡ç”¨ï¼ˆä¿„ç½—æ–¯è½®ç›˜ä¼šæå‰ç»ˆæ­¢ï¼‰
+
+for (int bounce = 0; bounce < maxBounces; bounce++)
+{
+	seed += bounce;  // æ¯å¼¹ä¸€æ¬¡æ¢ä¸ªç§å­
+
+	const HitPayload payload = TraceRay(ray);
+	if (payload.HitDistance < 0.0f)  // æ‰“åˆ°å¤©ç©º
+	{
+		// ç¯å¢ƒå…‰ï¼ˆHDR å¤©ç©ºçƒï¼‰
+		light += m_ActiveScene->SkyColor * contribution;
+		break;
 	}
 
-	//glm::vec3 ambient(0.2f);
-	
-	return { light, 1.0f };
+	const Sphere& sphere = m_ActiveScene->Spheres[payload.HitObjectIndex];
+	const Material& mat = m_ActiveScene->Materials[sphere.MaterialIndex];
+
+	// ç´¯åŠ è‡ªå‘å…‰ï¼ˆåªåœ¨ç¬¬ä¸€æ¬¡å‡»ä¸­æ—¶åŠ ï¼Œåé¢ä¸é‡å¤åŠ ï¼‰
+	if (bounce == 0 || mat.emission.r > 0.001f)
+		light += mat.emission * contribution;
+
+	// ä¿„ç½—æ–¯è½®ç›˜ï¼šæå‰ç»ˆæ­¢ä½èƒ½é‡è·¯å¾„ï¼ˆæå¤§æå‡æ•ˆç‡ï¼‰
+	float p = glm::max(contribution.r, glm::max(contribution.g, contribution.b));
+	if (bounce > 2 && Walnut::Random::Float(seed) > p)
+		break;
+	contribution *= p;  // èƒ½é‡è¡¥å¿
+
+	// ==================== é‡è¦ï¼šæ„å»ºå±€éƒ¨åæ ‡ç³» ====================
+	glm::vec3 N = payload.WorldNormal;
+	glm::vec3 T, B;
+	WorkUtils::CreateCoordinateSystem(N, T, B);  // ä½ éœ€è¦å®ç°è¿™ä¸ªå‡½æ•°ï¼ˆè§æ–‡æœ«ï¼‰
+
+	// ==================== é‡‡æ ·ä¸‹ä¸€ä¸ªæ–¹å‘ï¼ˆé‡è¦ï¼ï¼‰ ====================
+	glm::vec3 nextDir;
+	float pdf;
+	glm::vec3 brdf;
+
+	// é‡‘å±åº¦è¶Šé«˜ï¼Œè¶Šå€¾å‘é•œé¢åå°„
+	float metallic = mat.metallic;
+	float dielectricProb = 1.0f - metallic;
+
+	if (Walnut::Random::Float(seed++) < dielectricProb)
+	{
+		// æ¼«åå°„ï¼šä½™å¼¦åŠ æƒé‡‡æ ·ï¼ˆLambertï¼‰
+		nextDir = WorkUtils::CosineSampleHemisphere(seed);   // è¿”å›å±€éƒ¨ç©ºé—´æ–¹å‘
+		nextDir = nextDir.x * T + nextDir.y * B + nextDir.z * N;
+		pdf = glm::dot(nextDir, N) / PI;
+
+		// BRDF = albedo / Ï€ï¼ˆLambertï¼‰
+		brdf = mat.albedo / PI;
+	}
+	else
+	{
+		ray.Direction = glm::reflect(ray.Direction, payload.WorldNormal);
+		contribution *= mat.albedo;                     // é‡‘å±é¢œè‰²ç›´æ¥ä½œä¸ºé•œé¢å¼ºåº¦
+		ray.Origin = payload.Position + ray.Direction * 0.001f;
+		continue;
+		//glm::vec3 viewDir = -ray.Direction;
+		//glm::vec3 reflectDir = glm::reflect(ray.Direction, payload.WorldNormal);
+
+		//// æ³¨æ„ï¼šroughness è¦å¹³æ–¹ï¼è¿™æ˜¯å·¥ä¸šç•Œç»Ÿä¸€åšæ³•
+		//float rough2 = mat.roughness * mat.roughness;
+		//glm::vec3 noisyDir = glm::normalize(reflectDir + rough2 * Walnut::Random::InUnitSphere(seed));
+
+		//ray.Direction = noisyDir;
+
+		//// å…³é”®ï¼šé‡‘å±çš„ BRDF å°±æ˜¯ albedoï¼ˆæœ‰è‰²é‡‘å±ï¼‰ï¼Œæ²¡æœ‰ / Ï€
+		//glm::vec3 brdf = mat.albedo;
+
+		//// å³ä½¿æ˜¯é•œé¢ï¼Œä¹Ÿè¦ä¹˜ cosThetaï¼ˆèƒ½é‡å®ˆæ’ï¼‰
+		//float cosTheta = glm::max(0.0f, glm::dot(noisyDir, payload.WorldNormal));
+
+		//// pdf = 1.0fï¼ˆdelta åˆ†å¸ƒè¿‘ä¼¼ï¼‰ï¼Œä½†æˆ‘ä»¬è¿™é‡Œç”¨äº†æ‰°åŠ¨ï¼Œæ‰€ä»¥è¿‘ä¼¼ä¸º 1
+		//float pdf = 1.0f;
+
+		//contribution *= brdf * cosTheta / pdf;
+	}
+
+	// ==================== èƒ½é‡æ›´æ–°ï¼ˆæ ¸å¿ƒï¼ï¼‰ ====================
+	float cosTheta = glm::max(0.0f, glm::dot(nextDir, N));
+	contribution *= brdf * cosTheta / pdf;
+
+	// æ›´æ–°å…‰çº¿
+	ray.Origin = payload.Position + payload.WorldNormal * 1e-4f;
+	ray.Direction = nextDir;
+}
+
+return glm::vec4(light, 1.0f);
 
 }
 
-//Õâ¸öÊÇ¹Ø¼üµÄ´úÂëÁË£¬¶ÔÓÚËùÓĞ·¢³öµÄ¹âÏß£¬·Ö±ğ±éÀúËùÓĞµÄÇòÌå£¬¸üĞÂ×î¶ÌµÄ¾àÀëºÍ×î½üµÄÇòÌå
+//è¿™ä¸ªæ˜¯å…³é”®çš„ä»£ç äº†ï¼Œå¯¹äºæ‰€æœ‰å‘å‡ºçš„å…‰çº¿ï¼Œåˆ†åˆ«éå†æ‰€æœ‰çš„çƒä½“ï¼Œæ›´æ–°æœ€çŸ­çš„è·ç¦»å’Œæœ€è¿‘çš„çƒä½“
   Renderer::HitPayload Renderer::TraceRay(const Ray & ray)
 {
 
@@ -268,7 +382,7 @@ glm::vec4 Renderer::Perpixel( uint32_t x, uint32_t y)
 		const Sphere& sphere = m_ActiveScene->Spheres[i];
 		float radius = sphere.Radius;
 		glm::vec3 origin = ray.Origin - sphere.Position;
-		//Çó½âµÄ²ÎÊı·½³Ì,¶ş´Î·½³Ì
+		//æ±‚è§£çš„å‚æ•°æ–¹ç¨‹,äºŒæ¬¡æ–¹ç¨‹
 		//first=bx^2+by^2+bz^2
 		//seconf=2(ax*bx+ayby+)
 		//third= ax^2+ay^2+a^2-r^2
@@ -288,7 +402,7 @@ glm::vec4 Renderer::Perpixel( uint32_t x, uint32_t y)
 		//-b+sprt(disc);
 		float closestT = (-b - sqrt(disc)) /( 2.f * a);
 		//float to=(-b+sqrt(disc))/2*a;
-		//ÕâÀïºÍµ¯ÉäµÄ¹ØÏµÎÒ»¹Ã»¿´¶®
+		//è¿™é‡Œå’Œå¼¹å°„çš„å…³ç³»æˆ‘è¿˜æ²¡çœ‹æ‡‚
 		if (closestT>0.0f && closestT < hitdistance) {
 			hitdistance = closestT;
 			colosetSphere = (int)i;
@@ -327,8 +441,8 @@ glm::vec4 Renderer::Perpixel( uint32_t x, uint32_t y)
 
   glm::vec3 Renderer::BRDF(const glm::vec3& inDir, const glm::vec3& outDir, const glm::vec3& worldNormol, const Material& material)
   {
-	  glm::vec3 V = outDir;       // ³öÉä·½Ïò£¬Ö¸Ïò¹Û²ìÕß
-	  glm::vec3 L = inDir;        // ÈëÉä·½Ïò£¬Ö¸Ïò¹âÔ´»ò²ÉÑù·½Ïò
+	  glm::vec3 V = outDir;       // å‡ºå°„æ–¹å‘ï¼ŒæŒ‡å‘è§‚å¯Ÿè€…
+	  glm::vec3 L = inDir;        // å…¥å°„æ–¹å‘ï¼ŒæŒ‡å‘å…‰æºæˆ–é‡‡æ ·æ–¹å‘
 	  glm::vec3 H = glm::normalize(V + L);
 
 	  float NdotL = std::max(glm::dot(worldNormol, L), 0.0f);
@@ -337,13 +451,13 @@ glm::vec4 Renderer::Perpixel( uint32_t x, uint32_t y)
 	  float VdotH = std::max(glm::dot(V, H), 0.0f);
 
 	  // --- NDF: GGX ---
-	  float alpha = std::max(material.Roughness, 0.001f);
+	  float alpha = std::max(material.roughness, 0.001f);
 	  float alpha2 = alpha * alpha;
 	  float denom = NdotH * NdotH * (alpha2 - 1.0f) + 1.0f;
 	  float D = alpha2 / (3.14* denom * denom);
 
 	  // --- Fresnel ---
-	  glm::vec3 F0 = glm::mix(glm::vec3(0.04f), material.Albedo, material.Metalic);
+	  glm::vec3 F0 = glm::mix(glm::vec3(0.04f), material.albedo, material.metallic);
 	  glm::vec3 F = F0 + (glm::vec3(1.0f) - F0) * pow(1.0f - VdotH, 5.0f);
 
 	  // --- Geometry: Smith ---
@@ -394,7 +508,4 @@ glm::vec4 Renderer::Perpixel( uint32_t x, uint32_t y)
   }
 
 	
-
-
-
 
