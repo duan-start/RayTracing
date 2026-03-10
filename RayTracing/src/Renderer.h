@@ -46,9 +46,8 @@ class Renderer {
 	//BRDF
 	private:
 		//¾µÃæ·´ÉäµÄ¹±Ï×
-		glm::vec3 BRDF(const glm::vec3& inDir, const glm::vec3& outDir, const glm::vec3& worldNormol, const Material& material);
 		float Distri(const glm::vec3& half, const glm::vec3& normal, float roughness);
-		glm::vec3 Fer(const glm::vec3& inDir, const glm::vec3& half, const glm::vec3& Albedo);
+		glm::vec3 Fer(const glm::vec3& inDir, const glm::vec3& half, const glm::vec3& Albedo, float metalic);
 		float Gxx(const glm::vec3& inDir, const glm::vec3& outDir, const glm::vec3& normal, float roughness);
 		float G1(float NdotV, float roughness);
 	private:

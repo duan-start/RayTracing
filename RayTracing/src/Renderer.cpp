@@ -277,19 +277,25 @@ ray.Direction = m_ActiveCamera->GetRayDirection()[x + y * m_FinalImage->GetWidth
 uint32_t seed = x + y * m_FinalImage->GetWidth();
 seed *= m_FrameIndex;
 
-glm::vec3 contribution(1.0f);   // 当前路径的能量（throughput）
+// 当前路径的能量（throughput）
+//实际上是brdf
+glm::vec3 contribution(1.0f);  
 glm::vec3 light(0.0f);          // 累积辐射亮度
 
 int maxBounces = 8;             // 建议 6~10，多了也没用（俄罗斯轮盘会提前终止）
 
-for (int bounce = 0; bounce < maxBounces; bounce++)
+//我们既可以使用循环来写，也可以用递归来写
+for (int bounce = 0; ; bounce++)
 {
-	seed += bounce;  // 每弹一次换个种子
+	// 每弹一次换个种子,实现diffuse的随机采样
+	seed += bounce;  
 
 	const HitPayload payload = TraceRay(ray);
-	if (payload.HitDistance < 0.0f)  // 打到天空
+	// 打到天空
+	if (payload.HitDistance < 0.0f) 
 	{
-		// 环境光（HDR 天空球）
+		//直接看到天空，这是递归的结束（也是我们循环的结束）
+		//contribution是我们迭代到最后的brdf
 		light += m_ActiveScene->SkyColor * contribution;
 		break;
 	}
@@ -313,55 +319,67 @@ for (int bounce = 0; bounce < maxBounces; bounce++)
 	WorkUtils::CreateCoordinateSystem(N, T, B);  // 你需要实现这个函数（见文末）
 
 	// ==================== 采样下一个方向（重要！） ====================
+	//随机采样一个方向，作为我的radiance ，然后通过/pdf预估这个点的总的irradiance
 	glm::vec3 nextDir;
-	float pdf;
-	glm::vec3 brdf;
-
+	glm::vec3 diffuse;
+	glm::vec3 specluar;
+	float pdf{};
 	// 金属度越高，越倾向镜面反射
 	float metallic = mat.metallic;
-	float dielectricProb = 1.0f - metallic;
 
-	if (Walnut::Random::Float(seed++) < dielectricProb)
-	{
-		// 漫反射：余弦加权采样（Lambert）
+	//由于一次发射两根光线的复杂度无法接受，所以我们需要随机选定一个方向
+	//diffuse
+	//还有一个bug，影响全局的关系这个metallic好像
+	if (WorkUtils::RandomFloat(seed) > metallic) {
 		nextDir = WorkUtils::CosineSampleHemisphere(seed);   // 返回局部空间方向
 		nextDir = nextDir.x * T + nextDir.y * B + nextDir.z * N;
-		pdf = glm::dot(nextDir, N) / PI;
-
+		glm::vec3 F = Fer(ray.Direction, normalize(nextDir - ray.Direction), mat.albedo, metallic);
+		// 漫反射：余弦加权采样（Lambert）
 		// BRDF = albedo / π（Lambert）
-		brdf = mat.albedo / PI;
+		//float cos = std::max(0.f, dot(N, nextDir));
+		pdf = 1 / PI;
+		diffuse = (mat.albedo / PI) * (glm::vec3(1.0) - F);
+		
+		//但是如果diffuse的话，radiance*cosdw=radiance*pi
+		contribution *= diffuse/(pdf*(1-metallic));
+	}//specular
+	else {
+		auto roughness = mat.roughness;
+		// GGX采样
+		//float u1 = WorkUtils::RandomFloat(seed);
+		//float u2 = WorkUtils::RandomFloat(seed);
+		//float alpha = roughness * roughness;
+		//float theta = atan(alpha * sqrt(u1) / sqrt(1.0f - u1));
+		//float phi = 2.0f * PI * u2;
+		//glm::vec3 h_local(
+		//	sin(theta) * cos(phi),
+		//	sin(theta) * sin(phi),
+		//	cos(theta)
+		//);
+		//// 转换到世界空间
+		//glm::vec3 h = h_local.x * T + h_local.y * B + h_local.z * N;
+		//// 计算镜面反射方向
+		//nextDir = glm::reflect(ray.Direction, h);
+		////F
+
+		glm::vec3 idealReflect = glm::reflect(ray.Direction, payload.WorldNormal);
+		//粗糙扰动（近似微表面）
+		nextDir = glm::normalize(idealReflect +roughness * WorkUtils::InUnitSphere(++seed));
+		glm::vec3 h = glm::normalize(nextDir - ray.Direction);
+		glm::vec3 F = Fer(ray.Direction, h, mat.albedo, metallic);
+		//cooktkancace
+		//pdf
+		float D = Distri(h, N, roughness); // GGX NDF
+		float approx_pdf = Distri(h, N, roughness) * std::max(0.001f, dot(N, h)) /
+			(4.0f *std:: max(0.001f, dot(-ray.Direction, h)) + 1e-5f);
+		//float pdf = D * glm::dot(N, h) / (4 * glm::dot(ray.Direction, h));
+
+		float G = Gxx(-ray.Direction, nextDir, payload.WorldNormal,roughness);
+		//
+		specluar = D * F * G / ((4 * std::max(0.f,dot(-ray.Direction, payload.WorldNormal)) * std::max(0.f,dot(nextDir, payload.WorldNormal)))+0.1f);
+		float cosTheta = glm::max(0.0f, glm::dot(nextDir, N));
+		contribution *= specluar * cosTheta/ approx_pdf;
 	}
-	else
-	{
-		ray.Direction = glm::reflect(ray.Direction, payload.WorldNormal);
-		contribution *= mat.albedo;                     // 金属颜色直接作为镜面强度
-		ray.Origin = payload.Position + ray.Direction * 0.001f;
-		continue;
-		//glm::vec3 viewDir = -ray.Direction;
-		//glm::vec3 reflectDir = glm::reflect(ray.Direction, payload.WorldNormal);
-
-		//// 注意：roughness 要平方！这是工业界统一做法
-		//float rough2 = mat.roughness * mat.roughness;
-		//glm::vec3 noisyDir = glm::normalize(reflectDir + rough2 * Walnut::Random::InUnitSphere(seed));
-
-		//ray.Direction = noisyDir;
-
-		//// 关键：金属的 BRDF 就是 albedo（有色金属），没有 / π
-		//glm::vec3 brdf = mat.albedo;
-
-		//// 即使是镜面，也要乘 cosTheta（能量守恒）
-		//float cosTheta = glm::max(0.0f, glm::dot(noisyDir, payload.WorldNormal));
-
-		//// pdf = 1.0f（delta 分布近似），但我们这里用了扰动，所以近似为 1
-		//float pdf = 1.0f;
-
-		//contribution *= brdf * cosTheta / pdf;
-	}
-
-	// ==================== 能量更新（核心！） ====================
-	float cosTheta = glm::max(0.0f, glm::dot(nextDir, N));
-	contribution *= brdf * cosTheta / pdf;
-
 	// 更新光线
 	ray.Origin = payload.Position + payload.WorldNormal * 1e-4f;
 	ray.Direction = nextDir;
@@ -439,56 +457,24 @@ return glm::vec4(light, 1.0f);
 	  return payload;
   }
 
-  glm::vec3 Renderer::BRDF(const glm::vec3& inDir, const glm::vec3& outDir, const glm::vec3& worldNormol, const Material& material)
-  {
-	  glm::vec3 V = outDir;       // 出射方向，指向观察者
-	  glm::vec3 L = inDir;        // 入射方向，指向光源或采样方向
-	  glm::vec3 H = glm::normalize(V + L);
-
-	  float NdotL = std::max(glm::dot(worldNormol, L), 0.0f);
-	  float NdotV = std::max(glm::dot(worldNormol, V), 0.0f);
-	  float NdotH = std::max(glm::dot(worldNormol, H), 0.0f);
-	  float VdotH = std::max(glm::dot(V, H), 0.0f);
-
-	  // --- NDF: GGX ---
-	  float alpha = std::max(material.roughness, 0.001f);
-	  float alpha2 = alpha * alpha;
-	  float denom = NdotH * NdotH * (alpha2 - 1.0f) + 1.0f;
-	  float D = alpha2 / (3.14* denom * denom);
-
-	  // --- Fresnel ---
-	  glm::vec3 F0 = glm::mix(glm::vec3(0.04f), material.albedo, material.metallic);
-	  glm::vec3 F = F0 + (glm::vec3(1.0f) - F0) * pow(1.0f - VdotH, 5.0f);
-
-	  // --- Geometry: Smith ---
-	  auto G1 = [](float NdotX, float alpha) {
-		  return 2.0f * NdotX / (NdotX + sqrt(alpha * alpha + (1.0f - alpha * alpha) * NdotX * NdotX));
-		  };
-	  float G = G1(NdotL, alpha) * G1(NdotV, alpha);
-
-	  // --- Cook-Torrance specular ---
-	  float denominator = 4.0f * NdotL * NdotV + 1e-5f;
-	  glm::vec3 specular = (D * F * G) / denominator;
-
-	  return specular;
-	  
-  }
-
+ 
+  //NDF
   float Renderer::Distri(const glm::vec3& half, const glm::vec3& normal, float roughness)
   {
 	  float alpha = roughness * roughness;
 	  float NdotH = std::max(glm::dot(normal, half), 0.0f);
+	  if (NdotH == 1.0f)return 1.0f;
 	  float denom = (NdotH * NdotH * (alpha * alpha - 1.0f) + 1.0f);
-	  return (alpha * alpha) / (3.14 * denom * denom);
+	  return (alpha * alpha) / ((3.14 * denom * denom)+1e-5);
   }
 
-  // ----------------------------
-  // 2. F - Schlick Fresnel
-  // ----------------------------
-  glm::vec3 Renderer::Fer(const glm::vec3& inDir, const glm::vec3& half, const glm::vec3& Albedo)
+	//F0
+  glm::vec3 Renderer::Fer(const glm::vec3& inDir, const glm::vec3& half, const glm::vec3& Albedo,float metalic)
   {
+	  glm::vec3 F0 = glm::vec3(0.04, 0.04, 0.04);
 	  float VoH = std::max(glm::dot(inDir, half), 0.0f);
-	  return Albedo + (glm::vec3(1.0f) - Albedo) * pow(1.0f - VoH, 5.0f);
+	  glm::vec3 F1= Albedo + (glm::vec3(1.0f) - Albedo) * pow(1.0f - VoH, 5.0f);
+	  return F1 * (metalic)+F0*glm::vec3(1.0 - metalic);
   }
 
   // ----------------------------
@@ -499,7 +485,7 @@ return glm::vec4(light, 1.0f);
 	  float alpha = roughness * roughness;
 	  return 2.0f * NdotV / (NdotV + sqrt(alpha + (1.0f - alpha) * NdotV * NdotV));
   }
-
+  //G
   float Renderer::Gxx(const glm::vec3& inDir, const glm::vec3& outDir, const glm::vec3& normal, float roughness)
   {
 	  float NdotL = std::max(glm::dot(normal, inDir), 0.0f);
