@@ -6,6 +6,31 @@
 
 extern const float PI;
 namespace WorkUtils {
+
+	// 根据 GGX 分布采样一个半程向量 H
+	static glm::vec3 ImportanceSampleGGX(float r1, float r2, float roughness, glm::vec3 N) {
+		float a = roughness * roughness; // 工业界习惯用 alpha = roughness^2
+
+		// 计算极坐标下的 phi 和 theta
+		float phi = 2.0f * PI * r1;
+		float cosTheta = sqrt((1.0f - r2) / (1.0f + (a * a - 1.0f) * r2));
+		float sinTheta = sqrt(1.0f - cosTheta * cosTheta);
+
+		// 从极坐标转到笛卡尔坐标 (切线空间)
+		glm::vec3 H;
+		H.x = cos(phi) * sinTheta;
+		H.y = sin(phi) * sinTheta;
+		H.z = cosTheta;
+
+		// 将 H 从切线空间转换到世界空间 (基于宏观法线 N)
+		glm::vec3 up = abs(N.z) < 0.999 ? glm::vec3(0, 0, 1) : glm::vec3(1, 0, 0);
+		glm::vec3 tangent = glm::normalize(glm::cross(up, N));
+		glm::vec3 bitangent = glm::cross(N, tangent);
+
+		return tangent * H.x + bitangent * H.y + N * H.z;
+	}
+
+
 	// 创建局部坐标系（任意垂直基底）
 	static void CreateCoordinateSystem(const glm::vec3& N, glm::vec3& T, glm::vec3& B)
 	{
@@ -354,15 +379,26 @@ for (int bounce = 0;bounce<maxBounces ; bounce++)
 		glm::vec3 N = payload.WorldNormal;
 
 		// 理想反射
-		glm::vec3 idealReflect = glm::reflect(ray.Direction, N);
-
+		//glm::vec3 idealReflect = glm::reflect(ray.Direction, N);
 		// 粗糙扰动
-		nextDir = glm::normalize(idealReflect + roughness * WorkUtils::InUnitSphere(seed));
+		//nextDir = glm::normalize(idealReflect + roughness * WorkUtils::InUnitSphere(seed));
+
+		//pbr
+		// 1. 获取随机数
+		float r1 = WorkUtils::RandomFloat(seed);
+		float r2 = WorkUtils::RandomFloat(seed);
+
+		// 2. 重要性采样得到微观法线 H (这是物理正确的灵魂)
+		glm::vec3 H = WorkUtils::ImportanceSampleGGX(r1, r2, roughness, N);
+
+		// 3. 根据 V 和 H 算出反射光 L (入射方向)
+		nextDir = glm::normalize(glm::reflect(-V, H));
+
 
 		glm::vec3 L = nextDir;
 
 		// 半程向量
-		glm::vec3 H = glm::normalize(V + L);
+		//glm::vec3 H = glm::normalize(V + L);
 
 		float NdotL = std::max(glm::dot(N, L), 0.0f);
 		float NdotV = std::max(glm::dot(N, V), 0.0f);
